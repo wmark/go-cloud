@@ -222,7 +222,11 @@ func (o *URLOpener) OpenBucketURL(ctx context.Context, u *url.URL) (*blob.Bucket
 	if err != nil {
 		return nil, fmt.Errorf("open bucket %v: %v", u, err)
 	}
-	return OpenBucket(ctx, o.Client, u.Host, opts)
+	client := o.Client
+	if opts.GoogleAccessID == "-" {
+		client = gcp.NewAnonymousHTTPClient(gcp.DefaultTransport())
+	}
+	return OpenBucket(ctx, client, u.Host, opts)
 }
 
 func (o *URLOpener) forParams(ctx context.Context, q url.Values) (*Options, error) {
@@ -260,6 +264,11 @@ type Options struct {
 	// GoogleAccessID represents the authorizer for SignedURL.
 	// Required to use SignedURL.
 	// See https://godoc.org/cloud.google.com/go/storage#SignedURLOptions.
+	//
+	// Value "-" has a special meaning; it set up this instance as
+	// a credential-less anonymous client, for access to public buckets.
+	// Although strictly that's not necessary, it's a way to exclude the client
+	// from a future switch to policies such as "requester pays".
 	GoogleAccessID string
 
 	// PrivateKey is the Google service account private key.
@@ -298,6 +307,8 @@ func openBucket(ctx context.Context, client *gcp.HTTPClient, bucketName string, 
 			option.WithEndpoint("http://" + host + "/storage/v1/"),
 			option.WithHTTPClient(http.DefaultClient),
 		}
+	} else if opts != nil && opts.GoogleAccessID == "-" {
+		clientOpts = append(clientOpts, option.WithoutAuthentication())
 	}
 
 	// We wrap the provided http.Client to add a Go CDK User-Agent.
